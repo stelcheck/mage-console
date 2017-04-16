@@ -5,6 +5,12 @@ Alternative MAGE development console, with REPL interface.
 
 ![screen capture](./screen.gif)
 
+Features
+--------
+
+  - REPL interface which lets you introspect your MAGE application
+  - Watches your './lib' folder and automatically reloads the worker on file changes
+
 Requirements
 ------------
 
