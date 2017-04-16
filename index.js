@@ -131,11 +131,11 @@ function connect() {
 				clearTimeout(timeout);
 			}
 
-			setTimeout(function () {
+			timeout = setTimeout(function () {
 				repl.line = lineContent;
 				repl.lineParser.reset();
 				repl.displayPrompt(true);
-			}, 50);
+			}, 0);
 		}
 
 		readline.on('line', function (data) {
