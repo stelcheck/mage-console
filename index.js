@@ -8,14 +8,16 @@ var cluster = require('cluster');
 var chalk = require('chalk');
 var path = require('path');
 var fs = require('fs');
+var watch = require('node-watch');
 var MemoryStream = require('memorystream');
+
+var HISTORY_FILE = path.join(process.env.HOME, '.mage-history.json');
+var APP_LIB_PATH = path.join(process.cwd(), 'lib');
 
 /**
  * Boot mage
  */
-var cwd = process.cwd();
-var libPath = path.join(cwd, 'lib');
-var mage = require(libPath);
+var mage = require(APP_LIB_PATH);
 
 process.on('uncaughtException', function (error) {
 	if (!mage.logger) {
@@ -68,8 +70,20 @@ function createRepl(client, prompt) {
 		prompt: prompt
 	});
 
+	// Context setup
 	instance.context.mage = mage;
+
+	// History load
+	try {
+		instance.historySize = 500;
+		instance.history = require(HISTORY_FILE);
+	} catch (error) {
+		logger.debug('failed to load history file');
+	}
+
+	// On exit, store history and send shutdown signal to master process
 	instance.on('exit', function () {
+		fs.writeFileSync(HISTORY_FILE, JSON.stringify(instance.history));
 		process.send('shutdown');
 	});
 
@@ -143,6 +157,16 @@ function connect() {
 
 // Workers connect to the master process
 if (cluster.isWorker) {
+	// Watch the lib folder for changes
+	watch(APP_LIB_PATH, {
+		recursive: true
+	}, function (event, name) {
+		logger.debug('File ' + name + ' was ' + event + 'd, reloading');
+		process.send('reload');
+	});
+
+	// Connect to the master process and provide it
+	// with an access to a REPL interface
 	return setTimeout(connect, 1000);
 }
 
@@ -170,8 +194,15 @@ cluster.on('message', function (worker, message) {
 	logger.debug('received message', message);
 
 	switch (message) {
+	case 'reload':
+		logger.notice('reloading worker');
+		mage.core.processManager.reload(function () {
+			logger.notice('worker reloaded');
+		});
+		break;
 	case 'shutdown':
 		mage.quit();
+		break;
 	}
 });
 
