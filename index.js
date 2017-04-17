@@ -84,7 +84,6 @@ function createRepl(client, prompt) {
 	// On exit, store history and send shutdown signal to master process
 	instance.on('exit', function () {
 		fs.writeFileSync(HISTORY_FILE, JSON.stringify(instance.history));
-		process.send('shutdown');
 	});
 
 	return instance;
@@ -100,6 +99,7 @@ function createRepl(client, prompt) {
 function connect() {
 	logger.debug('connecting to master process');
 
+	var closing = false;
 	var client = net.connect(ipcPath, function () {
 		// Prompt and REPL configuration
 		var prompt = chalk.blue.bold('(' + process.pid + ') ') +
@@ -108,6 +108,11 @@ function connect() {
 
 		var promptLength = chalk.stripColor(prompt).length;
 		var repl = createRepl(client, prompt);
+
+		repl.on('exit', function () {
+			closing = true;
+			process.send('shutdown');
+		});
 
 		// All MAGE logs are sent on stderr; we capture its output,
 		// and proceed to read it line by line
@@ -119,26 +124,12 @@ function connect() {
 			input: stream
 		});
 
-		// Once we have printed lines, we automatically
-		// reset the prompt. The delay is there
-		// because Node.js needs some time to actually
-		// print output onto the console on Linux and macOS
-		// (were logging is asynchronous)
-		var timeout = null;
-
-		function scheduleReset(lineContent) {
-			if (timeout) {
-				clearTimeout(timeout);
+		readline.on('line', function (data) {
+			// If we are closing, don't print the prompt
+			if (closing) {
+				return realStderrWrite(data + '\n');
 			}
 
-			timeout = setTimeout(function () {
-				repl.line = lineContent;
-				repl.lineParser.reset();
-				repl.displayPrompt(true);
-			}, 0);
-		}
-
-		readline.on('line', function (data) {
 			// Buffer the current REPL line content
 			var lineContent = repl.line;
 
@@ -148,11 +139,15 @@ function connect() {
 			realStderrWrite(`\r${wipeLine}\r`);
 			realStderrWrite(data + '\n');
 
-			scheduleReset(lineContent);
+			realStderrWrite(prompt);
+			realStderrWrite(lineContent);
 		});
 	});
 
-	client.once('end', connect);
+	client.once('end', function () {
+		closing = true;
+		connect();
+	});
 }
 
 // Workers connect to the master process
