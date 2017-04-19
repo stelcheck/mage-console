@@ -186,8 +186,6 @@ cluster.on('message', function (worker, message) {
 		message = worker;
 	}
 
-	logger.debug('received message', message);
-
 	switch (message) {
 	case 'reload':
 		logger.notice('reloading worker');
@@ -196,6 +194,7 @@ cluster.on('message', function (worker, message) {
 		});
 		break;
 	case 'shutdown':
+		logger.notice('shutting down');
 		mage.quit();
 		break;
 	}
