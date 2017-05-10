@@ -8,6 +8,7 @@ Alternative MAGE development console, with REPL interface.
 Features
 --------
 
+  - Activates debugging (`--debug` for Node.js < 8.0.0, `--inspect` otherwise)
   - REPL interface which lets you introspect your MAGE application
   - Watches your './lib' folder and automatically reloads the worker on file changes
 
@@ -53,6 +54,34 @@ from `npm run mage` to `mage-console`:
 ```
 
 Then simply run `npm run develop` like you would normally do.
+
+Debugging
+---------
+
+### Ports
+
+The following ports are used automatically for debugging:
+
+  * Node > 8.0: 5858 (legacy protocol, using `--debug` flags);
+  * Node 8.0 and up: 9229 (inspect protocol, using `--inspect` flags);
+
+The debugging interface is activated on workers: this means that when you will
+save code, the worker will be restarted, and your debugging session will be terminated.
+
+### Remote debugging (docker)
+
+While debugging is activated by default, debugging is attached to localhost;
+if you develop in a Docker container, this means you won't be able to connect
+remotely to the debugging port.
+
+To solve this issue, you can set the `DEBUG_HOST` environment variable, as follow:
+
+```shell
+DEBUG_HOST="0.0.0.0" npm run develop
+```
+
+This will instruct `mage-console` to have the worker bind the debugging interface
+on all available interfaces instead of only on localhost.
 
 License
 --------

@@ -4,15 +4,101 @@
 
 var repl = require('repl');
 var net = require('net');
-var cluster = require('cluster');
+var cp = require('child_process');
 var chalk = require('chalk');
 var path = require('path');
 var fs = require('fs');
 var watch = require('node-watch');
 var MemoryStream = require('memorystream');
+var semver = require('semver');
+
+/**
+ * This function maps the current behaviour of the 'auto' flag
+ * in VSCode's launch/attach task definitions.
+ *
+ * Ref: https://code.visualstudio.com/docs/nodejs/nodejs-debugging#_supported-nodelike-runtimes
+ *
+ * @returns {string} The debug flag to pass to fork when starting a worker
+ */
+function getDebugFlagName() {
+	var version = process.version;
+
+	if (semver.lt(version, '8.0.0')) {
+		return '--debug';
+	}
+
+	return '--inspect';
+}
+
+/**
+ *
+ *
+ * @returns
+ */
+function getDebugFlagHost() {
+	return process.env.DEBUG_HOST || '127.0.0.1';
+}
+
+/**
+ * @param {string} flag Debug flag currrently used
+ * @returns {Number} Port value
+ */
+function getDebugFlagPort(flag) {
+	if (flag === '--debug') {
+		return 5858;
+	}
+
+	return 9229;
+}
 
 var HISTORY_FILE = path.join(process.env.HOME, '.mage-history.json');
 var APP_LIB_PATH = path.join(process.cwd(), 'lib');
+
+var DEBUG_FLAG_NAME = getDebugFlagName();
+var DEBUG_FLAG_HOST = getDebugFlagHost();
+var DEBUG_FLAG_PORT = getDebugFlagPort(DEBUG_FLAG_NAME);
+var DEBUG_FLAG = DEBUG_FLAG_NAME + '=' + DEBUG_FLAG_HOST + ':' + DEBUG_FLAG_PORT;
+
+/**
+ * This very, very ugly hack is required because of the following issue:
+ * https://github.com/nodejs/node/issues/12941
+ *
+ * Once this issue is fixed, an additional version check should be added
+ * to decide whether the hack should be applied or not.
+ */
+var fork = cp.fork;
+cp.fork = function (modulePath, args, options) {
+	var execArgv = options.execArgv;
+	var mageWorkerFlagIndex = execArgv.indexOf('--mage-worker');
+
+	if (mageWorkerFlagIndex !== -1) {
+		execArgv.splice(mageWorkerFlagIndex, 1);
+
+		for (var i = 0; i < execArgv.length; i++) {
+			var match = execArgv[i].match(
+				/^(--inspect|--debug)=(\d+)?$/
+			);
+
+			if (match) {
+				execArgv[i] = DEBUG_FLAG;
+				break;
+			}
+		}
+	}
+
+	return fork.call(cp, modulePath, args, options);
+};
+
+/**
+ * Setup flags to use when starting MAGE workers
+ */
+var cluster = require('cluster');
+if (cluster.isMaster) {
+	cluster.settings.execArgv = [
+		'--mage-worker',
+		DEBUG_FLAG
+	];
+}
 
 /**
  * Boot mage
@@ -227,4 +313,3 @@ server.listen(ipcPath, function (error) {
 
 	logger.debug('Exposed console from master process');
 });
-
