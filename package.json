@@ -1,10 +1,11 @@
 {
   "name": "mage-console",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Alternative MAGE development console, with REPL interface",
   "main": "index.js",
   "bin": {
-    "mage-console": "./index.js"
+    "mage-console": "./bin/mage-console",
+    "ts-mage-console": "./bin/ts-mage-console"
   },
   "scripts": {
     "test": "eslint --ext .js,.json ."

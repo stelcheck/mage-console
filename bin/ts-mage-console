@@ -1,0 +1,49 @@
+#!/usr/bin/env ts-node
+
+var cp = require('child_process');
+var chalk = require('chalk');
+var debug = require('../debug');
+
+var DEBUG_FLAG_NAME = debug.getDebugFlagName();
+var DEBUG_FLAG_HOST = debug.getDebugFlagHost();
+var DEBUG_FLAG_PORT = debug.getDebugFlagPort(DEBUG_FLAG_NAME);
+var DEBUG_FLAG = DEBUG_FLAG_NAME + '=' + DEBUG_FLAG_HOST + ':' + DEBUG_FLAG_PORT;
+
+/**
+ * This very, very ugly hack is required because of the following issue:
+ * https://github.com/nodejs/node/issues/12941
+ *
+ * Once this issue is fixed, an additional version check should be added
+ * to decide whether the hack should be applied or not.
+ */
+var fork = cp.fork;
+cp.fork = function (modulePath, args, options) {
+	var execArgv = options.execArgv;
+	var mageWorkerFlagIndex = execArgv.indexOf('--mage-worker');
+
+	if (mageWorkerFlagIndex !== -1) {
+		execArgv.splice(mageWorkerFlagIndex, 1);
+		debug.applyCPForkFlagsHack(execArgv, DEBUG_FLAG);
+
+		// This is needed to make sure that our worker also compiles the
+		// TypeScript code properly
+		//
+		// See: https://github.com/TypeStrong/ts-node/blob/8e3c7e55bbea4b60b184079a522bae3ace250ffc/src/_bin.ts#L176
+		execArgv.unshift('./node_modules/ts-node/dist/_bin.js');
+	}
+
+	return fork.call(cp, modulePath, args, options);
+};
+
+var cluster = require('cluster');
+if (cluster.isMaster) {
+	cluster.setupMaster({
+		execArgv: [
+			'--mage-worker',
+			DEBUG_FLAG
+		]
+	});
+}
+
+var mageConsole = require('../');
+mageConsole.promptPrefix = chalk.yellow('(ts) ');

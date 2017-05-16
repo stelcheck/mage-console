@@ -11,6 +11,7 @@ Features
   - Activates debugging (`--debug` for Node.js < 8.0.0, `--inspect` otherwise)
   - REPL interface which lets you introspect your MAGE application
   - Watches your './lib' folder and automatically reloads the worker on file changes
+  - Works for both JavaScript and TypeScript projects
 
 Requirements
 ------------
@@ -49,6 +50,16 @@ from `npm run mage` to `mage-console`:
 {
     "scripts": {
         "develop": "mage-console"
+    }
+}
+```
+
+If your project is a TypeScript project, set the value to `ts-mage-console` instead:
+
+```json
+{
+    "scripts": {
+        "develop": "ts-mage-console"
     }
 }
 ```
