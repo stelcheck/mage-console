@@ -29,7 +29,7 @@ cp.fork = function (modulePath, args, options) {
 		// TypeScript code properly
 		//
 		// See: https://github.com/TypeStrong/ts-node/blob/8e3c7e55bbea4b60b184079a522bae3ace250ffc/src/_bin.ts#L176
-		execArgv.unshift('./node_modules/ts-node/dist/_bin.js');
+		execArgv.push('./node_modules/ts-node/dist/_bin.js');
 	}
 
 	return fork.call(cp, modulePath, args, options);
