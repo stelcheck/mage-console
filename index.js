@@ -77,7 +77,7 @@ function createRepl(client, prompt) {
 		output: client,
 		useColors: true,
 		terminal: true,
-		prompt: [exports.promptPrefix, prompt].join(''),
+		prompt: prompt,
 		eval: exports.eval
 	});
 
@@ -111,9 +111,12 @@ function connect() {
 	logger.debug('connecting to master process');
 
 	var closing = false;
+	var scheduled = null;
+
 	var client = net.connect(ipcPath, function () {
 		// Prompt and REPL configuration
-		var prompt = chalk.blue.bold('(' + process.pid + ') ') +
+		var prompt = exports.promptPrefix +
+				chalk.blue.bold('(' + process.pid + ') ') +
 				chalk.cyan('mage/' + mage.rootPackage.name) +
 				chalk.magenta(' >> ');
 
@@ -135,6 +138,21 @@ function connect() {
 			input: stream
 		});
 
+		function schedulePrompt(lineContent) {
+			if (closing) {
+				return;
+			}
+
+			if (scheduled) {
+				clearTimeout(scheduled);
+			}
+
+			scheduled = setTimeout(function () {
+				realStderrWrite(prompt);
+				realStderrWrite(lineContent);
+			}, 100);
+		}
+
 		readline.on('line', function (data) {
 			// If we are closing, don't print the prompt
 			if (closing) {
@@ -150,8 +168,7 @@ function connect() {
 			realStderrWrite(`\r${wipeLine}\r`);
 			realStderrWrite(data + '\n');
 
-			realStderrWrite(prompt);
-			realStderrWrite(lineContent);
+			schedulePrompt(lineContent);
 		});
 	});
 
