@@ -4,7 +4,7 @@ var cp = require('child_process');
 var chalk = require('chalk');
 var debug = require('../debug');
 
-var DEBUG_FLAG_NAME = debug.getDebugFlagName();
+var DEBUG_FLAG_NAME = '--inspect';
 var DEBUG_FLAG_HOST = debug.getDebugFlagHost();
 var DEBUG_FLAG_PORT = debug.getDebugFlagPort(DEBUG_FLAG_NAME);
 var DEBUG_FLAG = DEBUG_FLAG_NAME + '=' + DEBUG_FLAG_HOST + ':' + DEBUG_FLAG_PORT;

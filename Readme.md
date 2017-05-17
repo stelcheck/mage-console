@@ -73,8 +73,9 @@ Debugging
 
 The following ports are used automatically for debugging:
 
-  * Node > 8.0: 5858 (legacy protocol, using `--debug` flags);
+  * TypeScript: 9229 (inspect protocol, using `--inspect` flags);
   * Node 8.0 and up: 9229 (inspect protocol, using `--inspect` flags);
+  * Node less than 8.0: 5858 (legacy protocol, using `--debug` flags);
 
 The debugging interface is activated on workers: this means that when you will
 save code, the worker will be restarted, and your debugging session will be terminated.
@@ -93,6 +94,30 @@ DEBUG_HOST="0.0.0.0" npm run develop
 
 This will instruct `mage-console` to have the worker bind the debugging interface
 on all available interfaces instead of only on localhost.
+
+
+### Visual Studio Code configuration
+
+The default debugging port selection is made to match the behaviour
+of VSCode. However, if you are using TypeScript, you will need to specifically
+mention that you are using the new inspect protocol:
+
+> .vscode/launch.json
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [{
+    "name": "Attach to MAGE instance",
+    "type": "node",
+    "request": "attach",
+    "sourceMaps": true,
+    "outDir": "${workspaceRoot}/dist",
+    "protocol": "inspector",
+    "internalConsoleOptions": "neverOpen"
+  }]
+}
+```
 
 License
 --------
