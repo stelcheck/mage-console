@@ -60,7 +60,8 @@ function getIPCPath() {
 		return path.join('\\\\.\\pipe', __dirname, 'mage-console.sock');
 	}
 
-	return path.join(__dirname, 'mage-console.sock');
+	// See https://github.com/nodejs/node/issues/13670 for more details
+	return path.relative(process.cwd(), path.join(__dirname, 'mage-console.sock'));
 }
 
 var ipcPath = getIPCPath();
