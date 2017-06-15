@@ -12,6 +12,8 @@ var MemoryStream = require('memorystream');
 var HISTORY_FILE = path.join(process.env.HOME, '.mage-history.json');
 var APP_LIB_PATH = path.join(process.cwd(), 'lib');
 
+var debug = require('./debug');
+
 /**
  * exports.eval can be used to customise how the code and commands
  * will be interpreted in the REPL interface - null means default node
@@ -23,6 +25,11 @@ exports.eval = null;
  * Additional prefix to set on the REPL's prompt
  */
 exports.promptPrefix = '';
+
+/**
+ * Debug flag to use
+ */
+exports.debugFlag = '--debug';
 
 /**
  * Boot mage
@@ -47,6 +54,11 @@ if (clusterConfiguration !== 1) {
 	console.error('');
 
 	process.exit(-1);
+}
+
+function crash(error) {
+	console.error(error);
+	mage.quit(-1);
 }
 
 var logger = mage.core.logger.context('REPL');
@@ -205,6 +217,45 @@ try {
 	// do nothing, file was probably not there
 }
 
+// Debug port proxy
+//
+// On older Node version, no programmatic APIs were available
+// for us to force-disconnect inspector sessions on process.exit;
+// to deal with this issue, we instead proxy the debugger/inspector
+// connection through the master, and force a disconnect on our end
+// whenever a shutdown is detected
+var debuggerConnections = [];
+
+function closeDebuggerConnection() {
+	debuggerConnections.forEach(function ({ localSocket, debuggerConnection }) {
+		debuggerConnection.unpipe(localSocket);
+		localSocket.unpipe(debuggerConnection);
+
+		localSocket.unref();
+		debuggerConnection.unref();
+
+		debuggerConnection.end();
+		localSocket.end();
+	});
+
+	debuggerConnections = [];
+}
+
+net.createServer(function (localSocket) {
+	var workerDebugPort = debug.getWorkerDebugPort();
+
+	if (!workerDebugPort) {
+		return localSocket.end(); // retry later
+	}
+
+	var debuggerConnection = net.connect(workerDebugPort);
+
+	debuggerConnection.pipe(localSocket);
+	localSocket.pipe(debuggerConnection);
+
+	debuggerConnections.push({ localSocket, debuggerConnection });
+}).listen(debug.port);
+
 // If the worker receives SIGINT, it will proceed
 // to send a shutdown message to the master process.
 // This could eventually be used to pass additional commands
@@ -217,12 +268,14 @@ cluster.on('message', function (worker, message) {
 
 	switch (message) {
 	case 'reload':
+		closeDebuggerConnection();
 		logger.notice('reloading worker');
 		mage.core.processManager.reload(function () {
 			logger.notice('worker reloaded');
 		});
 		break;
 	case 'shutdown':
+		closeDebuggerConnection();
 		logger.notice('shutting down');
 		mage.quit();
 		break;
@@ -250,9 +303,10 @@ var server = net.createServer(function (client) {
 
 server.listen(ipcPath, function (error) {
 	if (error) {
-		logger.emergency(error);
-		return mage.quit(-1);
+		return crash(error);
 	}
 
 	logger.debug('Exposed console from master process');
 });
+
+server.on('error', crash);

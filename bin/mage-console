@@ -6,8 +6,8 @@ var debug = require('../debug');
 
 var DEBUG_FLAG_NAME = debug.getDebugFlagName();
 var DEBUG_FLAG_HOST = debug.getDebugFlagHost();
-var DEBUG_FLAG_PORT = debug.getDebugFlagPort(DEBUG_FLAG_NAME);
-var DEBUG_FLAG = DEBUG_FLAG_NAME + '=' + DEBUG_FLAG_HOST + ':' + DEBUG_FLAG_PORT;
+
+debug.setDebugPortForFlag(DEBUG_FLAG_NAME);
 
 /**
  * This very, very ugly hack is required because of the following issue:
@@ -19,28 +19,21 @@ var DEBUG_FLAG = DEBUG_FLAG_NAME + '=' + DEBUG_FLAG_HOST + ':' + DEBUG_FLAG_PORT
 var fork = cp.fork;
 cp.fork = function (modulePath, args, options) {
 	var execArgv = options.execArgv;
-	var mageWorkerFlagIndex = execArgv.indexOf('--mage-worker');
-
-	if (mageWorkerFlagIndex !== -1) {
-		execArgv.splice(mageWorkerFlagIndex, 1);
-		debug.applyCPForkFlagsHack(execArgv, DEBUG_FLAG);
-	}
+	var debugFlag = DEBUG_FLAG_NAME + '=' + DEBUG_FLAG_HOST + ':' + debug.incrementDebugPort();
+	debug.applyCPForkFlagsHack(execArgv, debugFlag);
 
 	return fork.call(cp, modulePath, args, options);
 };
 
-/**
- * Setup flags to use when starting MAGE workers
- */
 var cluster = require('cluster');
 if (cluster.isMaster) {
 	cluster.setupMaster({
 		execArgv: [
-			'--mage-worker',
-			DEBUG_FLAG
+			DEBUG_FLAG_NAME
 		]
 	});
 }
 
 var mageConsole = require('../');
 mageConsole.promptPrefix = chalk.yellow('(js) ');
+mageConsole.debugFlag = DEBUG_FLAG_NAME;

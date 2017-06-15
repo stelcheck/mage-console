@@ -28,15 +28,33 @@ exports.getDebugFlagHost = function () {
 };
 
 /**
+ * Debug port to listen on
+ */
+exports.port = 5858;
+
+/**
  * @param {string} flag Debug flag currrently used
+ */
+exports.setDebugPortForFlag = function (flag) {
+	if (flag === '--debug') {
+		this.port = 5858;
+	} else {
+		this.port = 9229;
+	}
+};
+
+let workerPort = 2501; // GisT!
+
+/**
  * @returns {Number} Port value
  */
-exports.getDebugFlagPort = function (flag) {
-	if (flag === '--debug') {
-		return 5858;
-	}
+exports.getWorkerDebugPort = function () {
+	return workerPort;
+};
 
-	return 9229;
+exports.incrementDebugPort = function () {
+	workerPort += 1;
+	return this.getWorkerDebugPort();
 };
 
 exports.applyCPForkFlagsHack = function (execArgv, debugFlag) {
