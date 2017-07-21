@@ -78,6 +78,10 @@ function getIPCPath() {
 
 var ipcPath = getIPCPath();
 
+function saveHistory(history) {
+	fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
+}
+
 /**
  * @summary Create a REPL server on the worker.
  * @param {net.Socket} client Client connection connecting back to the master process.
@@ -107,7 +111,7 @@ function createRepl(client, prompt) {
 
 	// On exit, store history and send shutdown signal to master process
 	instance.on('exit', function () {
-		fs.writeFileSync(HISTORY_FILE, JSON.stringify(instance.history));
+		saveHistory(instance.history);
 	});
 
 	return instance;
@@ -183,6 +187,15 @@ function connect() {
 
 			schedulePrompt(lineContent);
 		});
+
+		// Watch the lib folder for changes
+		watch(APP_LIB_PATH, {
+			recursive: true
+		}, function (event, name) {
+			logger.debug('File ' + name + ' was ' + event + 'd, reloading');
+			saveHistory(repl.history);
+			process.send('reload');
+		});
 	});
 
 	client.once('end', function () {
@@ -193,14 +206,6 @@ function connect() {
 
 // Workers connect to the master process
 if (cluster.isWorker) {
-	// Watch the lib folder for changes
-	watch(APP_LIB_PATH, {
-		recursive: true
-	}, function (event, name) {
-		logger.debug('File ' + name + ' was ' + event + 'd, reloading');
-		process.send('reload');
-	});
-
 	// Connect to the master process and provide it
 	// with an access to a REPL interface
 	return setTimeout(connect, 1000);
