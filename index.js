@@ -14,6 +14,18 @@ var APP_LIB_PATH = path.join(process.cwd(), 'lib');
 
 var debug = require('./debug');
 
+function watchFiles(onChange) {
+	watch(APP_LIB_PATH, {
+		recursive: true
+	}, function (event, name) {
+		if (name.split(path.sep).pop()[0] === '.') {
+			return;
+		}
+
+		onChange(event, name);
+	});
+}
+
 /**
  * exports.eval can be used to customise how the code and commands
  * will be interpreted in the REPL interface - null means default node
@@ -35,13 +47,7 @@ exports.debugFlag = '--debug';
  * Boot mage
  */
 var mage = require(APP_LIB_PATH);
-
-process.on('uncaughtException', function (error) {
-	if (!mage.logger) {
-		console.error(error);
-		process.exit(-1);
-	}
-});
+var processManager = mage.core.processManager;
 
 mage.boot();
 
@@ -56,24 +62,27 @@ if (clusterConfiguration !== 1) {
 	process.exit(-1);
 }
 
-function crash(error) {
-	console.error(error);
-	mage.quit(-1);
-}
-
 var logger = mage.core.logger.context('REPL');
+
+function crash(error) {
+	mage.logger.error(error);
+	mage.quit();
+}
 
 /**
  * @summary Retrieve the IPC path on which to listen/connect to
  * @returns {String} path the master process will listen on
  */
 function getIPCPath() {
+	// See https://github.com/nodejs/node/issues/13670 for more details
+	const defaultFilepath = path.relative(process.cwd(), path.join(__dirname, 'mage-console.sock'));
+	const filepath = mage.core.config.get('external.mage-console.sockfile') || defaultFilepath;
+
 	if (process.platform === 'win32') {
-		return path.join('\\\\.\\pipe', __dirname, 'mage-console.sock');
+		return path.join('\\\\.\\pipe', filepath);
 	}
 
-	// See https://github.com/nodejs/node/issues/13670 for more details
-	return path.relative(process.cwd(), path.join(__dirname, 'mage-console.sock'));
+	return filepath;
 }
 
 var ipcPath = getIPCPath();
@@ -189,9 +198,7 @@ function connect() {
 		});
 
 		// Watch the lib folder for changes
-		watch(APP_LIB_PATH, {
-			recursive: true
-		}, function (event, name) {
+		watchFiles(function (event, name) {
 			logger.debug('File ' + name + ' was ' + event + 'd, reloading');
 			saveHistory(repl.history);
 			process.send('reload');
@@ -214,6 +221,27 @@ if (cluster.isWorker) {
 // Master process provides a network server for process
 // to connect to, and patches stdin/stdout/stderr into
 // the connection
+
+cluster.removeAllListeners('exit');
+cluster.on('exit', function (worker) {
+	// check if the worker was supposed to die
+
+	if (!worker._mageManagedExit) {
+		// this exit was not supposed to happen!
+		// spawn a new worker to replace the dead one
+
+		processManager.emit('workerOffline', worker.id);
+		watchFiles(function (event, name) {
+			logger.debug('File ' + name + ' was ' + event + 'd, reloading');
+			processManager.createWorker();
+		});
+	} else {
+		if (!processManager.getNumWorkers()) {
+			logger.emergency('All workers have shut down, shutting down master now.');
+			process.exit(0);
+		}
+	}
+});
 
 // Clean up old lingering sockets
 try {
