@@ -66,6 +66,22 @@ If your project is a TypeScript project, set the value to `ts-mage-console` inst
 
 Then simply run `npm run develop` like you would normally do.
 
+Configuration
+--------------
+
+You may configure `mage-console` by adding configuration entries into your MAGE
+configuration. See [MAGE's documentation](https://mage.github.io/mage/#configuration) for more details.
+
+> config/default.yaml
+
+```yaml
+external:
+  mage-console:
+    # Where to put the socket file for the console.
+    # Default: [project-dir]/node_modules/mage-console/mage-console.sock
+    sockfile: /tmp/mage-console.sock
+```
+
 Debugging
 ---------
 
