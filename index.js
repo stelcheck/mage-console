@@ -14,14 +14,21 @@ var APP_LIB_PATH = path.join(process.cwd(), 'lib');
 
 var debug = require('./debug');
 
-function watchFiles(onChange) {
-	watch(APP_LIB_PATH, {
+function onceSomeFilesChanged(onChange) {
+	var called = false;
+	var watcher = watch(APP_LIB_PATH, {
 		recursive: true
 	}, function (event, name) {
 		if (name.split(path.sep).pop()[0] === '.') {
 			return;
 		}
 
+		if (called) {
+			return;
+		}
+
+		called = true;
+		watcher.close();
 		onChange(event, name);
 	});
 }
@@ -198,7 +205,7 @@ function connect() {
 		});
 
 		// Watch the lib folder for changes
-		watchFiles(function (event, name) {
+		onceSomeFilesChanged(function (event, name) {
 			logger.debug('File ' + name + ' was ' + event + 'd, reloading');
 			saveHistory(repl.history);
 			process.send('reload');
@@ -231,7 +238,7 @@ cluster.on('exit', function (worker) {
 		// spawn a new worker to replace the dead one
 
 		processManager.emit('workerOffline', worker.id);
-		watchFiles(function (event, name) {
+		onceSomeFilesChanged(function (event, name) {
 			logger.debug('File ' + name + ' was ' + event + 'd, reloading');
 			processManager.createWorker();
 		});

@@ -1,6 +1,6 @@
 {
   "name": "mage-console",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Alternative MAGE development console, with REPL interface",
   "main": "index.js",
   "bin": {
