@@ -53,19 +53,14 @@ exports.getWorkerDebugPort = function () {
 };
 
 exports.incrementDebugPort = function () {
-	workerPort += 1;
-	return this.getWorkerDebugPort();
+	return workerPort += 1;
 };
 
 exports.applyCPForkFlagsHack = function (execArgv, debugFlag) {
-	for (var i = 0; i < execArgv.length; i++) {
-		var match = execArgv[i].match(
-			/^(--inspect|--debug)=(\d+)?$/
-		);
+	execArgv = execArgv.filter(function (flag) {
+		return !flag.match(/^(--inspect|--debug)/);
+	});
 
-		if (match) {
-			execArgv[i] = debugFlag;
-			break;
-		}
-	}
+	execArgv.unshift(debugFlag);
+	return execArgv;
 };
