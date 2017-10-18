@@ -18,9 +18,8 @@ debug.setDebugPortForFlag(DEBUG_FLAG_NAME);
  */
 var fork = cp.fork;
 cp.fork = function (modulePath, args, options) {
-	var execArgv = options.execArgv;
 	var debugFlag = DEBUG_FLAG_NAME + '=' + DEBUG_FLAG_HOST + ':' + debug.incrementDebugPort();
-	debug.applyCPForkFlagsHack(execArgv, debugFlag);
+	options.execArgv = debug.applyCPForkFlagsHack(options.execArgv, debugFlag);
 
 	return fork.call(cp, modulePath, args, options);
 };
