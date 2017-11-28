@@ -266,18 +266,21 @@ try {
 // whenever a shutdown is detected
 var debuggerConnections = [];
 
-function closeDebuggerConnection() {
-	debuggerConnections.forEach(function ({ localSocket, debuggerConnection }) {
-		debuggerConnection.unpipe(localSocket);
-		localSocket.unpipe(debuggerConnection);
+function closeDebuggerConnection({ localSocket, debuggerConnection }) {
+	debuggerConnection.unpipe(localSocket);
+	localSocket.unpipe(debuggerConnection);
 
-		localSocket.unref();
-		debuggerConnection.unref();
+	localSocket.unref();
+	debuggerConnection.unref();
 
-		debuggerConnection.end();
-		localSocket.end();
-	});
+	debuggerConnection.end();
+	localSocket.end();
 
+	debuggerConnection.destroy();
+	localSocket.destroy();
+}
+function closeDebuggerConnections() {
+	debuggerConnections.forEach(closeDebuggerConnection);
 	debuggerConnections = [];
 }
 
@@ -292,6 +295,16 @@ net.createServer(function (localSocket) {
 
 	debuggerConnection.pipe(localSocket);
 	localSocket.pipe(debuggerConnection);
+
+	debuggerConnection.on('error', function (error) {
+		logger.warning('Error raised on the connection to the worker debug port', error);
+		closeDebuggerConnection({ localSocket, debuggerConnection });
+	});
+
+	localSocket.on('error', function (error) {
+		logger.warning('Error raised on the connection to the debugger proxy port', error);
+		closeDebuggerConnection({ localSocket, debuggerConnection });
+	});
 
 	debuggerConnections.push({ localSocket, debuggerConnection });
 }).listen(debug.port);
@@ -308,14 +321,14 @@ cluster.on('message', function (worker, message) {
 
 	switch (message) {
 	case 'reload':
-		closeDebuggerConnection();
+		closeDebuggerConnections();
 		logger.notice('reloading worker');
 		mage.core.processManager.reload(function () {
 			logger.notice('worker reloaded');
 		});
 		break;
 	case 'shutdown':
-		closeDebuggerConnection();
+		closeDebuggerConnections();
 		logger.notice('shutting down');
 		mage.quit();
 		break;
