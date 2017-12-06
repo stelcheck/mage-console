@@ -80,6 +80,12 @@ external:
     # Where to put the socket file for the console.
     # Default: [project-dir]/node_modules/mage-console/mage-console.sock
     sockfile: /tmp/mage-console.sock
+
+    # Watch additional files; we will always watch `./config' and './lib',
+    # but you may want to watch additional folders as well.
+    watch:
+      - /tmp/file
+      - ./www
 ```
 
 Debugging

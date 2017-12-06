@@ -6,17 +6,67 @@ var chalk = require('chalk');
 var path = require('path');
 var cluster = require('cluster');
 var fs = require('fs');
+var PrettyError = require('pretty-error');
 var watch = require('node-watch');
 var MemoryStream = require('memorystream');
 
 var HISTORY_FILE = path.join(process.env.HOME, '.mage-history.json');
 var APP_LIB_PATH = path.join(process.cwd(), 'lib');
+var APP_CONFIG_PATH = path.join(process.cwd(), 'config');
 
 var debug = require('./debug');
+var prettyError = new PrettyError();
+
+/**
+ * Additional prefix to set on the REPL's prompt
+ */
+exports.promptPrefix = '';
+
+/**
+ * Debug flag to use
+ */
+exports.debugFlag = '--debug';
+
+/**
+ * Force-configure mage to use cluster: 1 (one master, one process),
+ * and set the list of files and folders to watch for.
+ */
+var config = require('../mage/lib/config');
+config.set('server.cluster', 1);
+
+var WATCH_FILES = config.get('external.mage-console.watch', []);
+
+WATCH_FILES.push(APP_CONFIG_PATH);
+WATCH_FILES.push(APP_LIB_PATH);
+
+/**
+ * Load the application and boot
+ */
+var mage = require(APP_LIB_PATH);
+var logger = mage.core.logger.context('REPL');
+var processManager = mage.core.processManager;
+
+mage.boot();
+
+function setRawMode(val) {
+	var stdin = process.stdin;
+
+	if (!stdin.setRawMode) {
+		logger
+			.emergency
+			.details('This may happen when using terminals such as MINGW64 on Windows')
+			.details('Please try to use PowerShell or cmd.exe instead')
+			.log('Cannot run mage-console; cannot switch to raw mode');
+
+		mage.quit(1, true);
+	}
+
+	stdin.setRawMode(val);
+}
 
 function onceSomeFilesChanged(onChange) {
 	var called = false;
-	var watcher = watch(APP_LIB_PATH, {
+	var watcher = watch(WATCH_FILES, {
 		recursive: true
 	}, function (event, name) {
 		if (name.split(path.sep).pop()[0] === '.') {
@@ -31,45 +81,9 @@ function onceSomeFilesChanged(onChange) {
 		watcher.close();
 		onChange(event, name);
 	});
+
+	return watcher;
 }
-
-/**
- * exports.eval can be used to customise how the code and commands
- * will be interpreted in the REPL interface - null means default node
- * behaviour
- */
-exports.eval = null;
-
-/**
- * Additional prefix to set on the REPL's prompt
- */
-exports.promptPrefix = '';
-
-/**
- * Debug flag to use
- */
-exports.debugFlag = '--debug';
-
-/**
- * Boot mage
- */
-var mage = require(APP_LIB_PATH);
-var processManager = mage.core.processManager;
-
-mage.boot();
-
-var clusterConfiguration = mage.core.config.get('server.cluster');
-
-if (clusterConfiguration !== 1) {
-	console.error('');
-	console.error('mage-console requires your application to be configured with');
-	console.error('"server.cluster" to 1. Please change your configuration and try again');
-	console.error('');
-
-	process.exit(-1);
-}
-
-var logger = mage.core.logger.context('REPL');
 
 function crash(error) {
 	mage.logger.error(error);
@@ -83,7 +97,7 @@ function crash(error) {
 function getIPCPath() {
 	// See https://github.com/nodejs/node/issues/13670 for more details
 	const defaultFilepath = path.relative(process.cwd(), path.join(__dirname, 'mage-console.sock'));
-	const filepath = mage.core.config.get('external.mage-console.sockfile') || defaultFilepath;
+	const filepath = config.get('external.mage-console.sockfile') || defaultFilepath;
 
 	if (process.platform === 'win32') {
 		return path.join('\\\\.\\pipe', filepath);
@@ -110,9 +124,56 @@ function createRepl(client, prompt) {
 		output: client,
 		useColors: true,
 		terminal: true,
-		prompt: prompt,
-		eval: exports.eval
+		prompt: prompt
 	});
+
+	// We wish to log REPL errors differently than how
+	// we log errors coming from MAGE logger, but still
+	// in a way that integrates with the logger (so that logs
+	// may still be written to file, and so on); we want the logger
+	// context, and we want to prettify the error output.
+	function logError(error) {
+		var newStack = error.stack.split('\n');
+		var done = false;
+		error.stack = '';
+
+		while (!done && newStack.length > 0) {
+			var line = newStack.shift();
+			error.stack += line + '\n';
+			if (line.indexOf('    at repl:1') !== -1) {
+				done = true;
+			}
+		}
+
+		var rendered = prettyError.render(error);
+		rendered = rendered.slice(0, -5);
+		rendered = rendered.replace(/\n/g, chalk.styles.red.open + '\n');
+		logger.error(rendered);
+	}
+
+	// We remove the default domain error handler on the REPL
+	// and replace it with our logging factory
+	instance._domain.removeAllListeners('error');
+	instance._domain.on('error', logError);
+
+	// Finally, we override the eval function.
+	// since we want to keep the same behavior as the normal eval
+	// but handle errors a bit differently, we create a normal REPL,
+	// store it's eval method somewhere, then override it.
+	var realEval = instance.eval;
+	instance.eval = function (cmd, context, filename, callback) {
+		realEval(cmd, context, filename, function (error, res) {
+			if (error) {
+				if (!error.stack) {
+					return callback(error);
+				}
+
+				logError(error);
+			}
+
+			callback(null, res);
+		});
+	};
 
 	// Context setup
 	instance.context.mage = mage;
@@ -153,7 +214,7 @@ function connect() {
 				chalk.cyan('mage/' + mage.rootPackage.name) +
 				chalk.magenta(' >> ');
 
-		var promptLength = chalk.stripColor(prompt).length;
+		var promptLength = prompt.length;
 		var repl = createRepl(client, prompt);
 
 		repl.on('exit', function () {
@@ -171,7 +232,7 @@ function connect() {
 			input: stream
 		});
 
-		function schedulePrompt(lineContent) {
+		function schedulePrompt() {
 			if (closing) {
 				return;
 			}
@@ -181,8 +242,7 @@ function connect() {
 			}
 
 			scheduled = setTimeout(function () {
-				realStderrWrite(prompt);
-				realStderrWrite(lineContent);
+				repl.displayPrompt(true);
 			}, 100);
 		}
 
@@ -201,7 +261,7 @@ function connect() {
 			realStderrWrite(`\r${wipeLine}\r`);
 			realStderrWrite(data + '\n');
 
-			schedulePrompt(lineContent);
+			schedulePrompt();
 		});
 
 		// Watch the lib folder for changes
@@ -210,6 +270,18 @@ function connect() {
 			saveHistory(repl.history);
 			process.send('reload');
 		});
+	});
+
+	// Propagate the stdout resize events to the client, so that the readline
+	// interface behind our REPL may process properly commands that fit on
+	// multiple lines
+	client.columns = process.stdout.columns;
+	client.rows = process.stdout.rows;
+
+	process.stdout.on('resize', function () {
+		client.columns = process.stdout.columns;
+		client.rows = process.stdout.rows;
+		client.emit('resize');
 	});
 
 	client.once('end', function () {
@@ -227,27 +299,58 @@ if (cluster.isWorker) {
 
 // Master process provides a network server for process
 // to connect to, and patches stdin/stdout/stderr into
-// the connection
+// the connection. It also hijacks MAGE's reload logic, so
+// to allow for pauses while waiting for a restart (example:
+// if the server reloads and crashes, wait for a file change
+// before restarting)
 
-cluster.removeAllListeners('exit');
-cluster.on('exit', function (worker) {
-	// check if the worker was supposed to die
+processManager.on('started', function () {
+	cluster.removeAllListeners('exit');
+	cluster.on('exit', function (worker) {
+		worker.dropStartupTimeout();
 
-	if (!worker._mageManagedExit) {
-		// this exit was not supposed to happen!
-		// spawn a new worker to replace the dead one
+		var id = worker.mageWorkerId;
+		processManager.emit('workerOffline', id, worker._mageManagedExit);
 
-		processManager.emit('workerOffline', worker.id);
-		onceSomeFilesChanged(function (event, name) {
-			logger.debug('File ' + name + ' was ' + event + 'd, reloading');
-			processManager.createWorker();
-		});
-	} else {
-		if (!processManager.getNumWorkers()) {
-			logger.emergency('All workers have shut down, shutting down master now.');
-			process.exit(0);
+		// If a worker was running and it suddenly dies, we automatically
+		// restart it. If not, we consider something must be wrong with the
+		// application's code, and stall until either a file is updated or
+		// a key is pressed in the terminal
+		if (!worker._mageManagedExit) {
+			logger.debug('Reloading');
+			processManager.getWorkerManager().createWorker(id);
+		} else {
+			console.log('');
+			logger.warning('------------------------------------------------------');
+			logger.warning('Worker down, save a file or press any key to reload...');
+			logger.warning('------------------------------------------------------');
+
+			var stdin = process.stdin;
+			var waiter;
+
+			function onKeyPress() {
+				if (waiter) {
+					waiter.close();
+				}
+
+				stdin.pause();
+
+				processManager.getWorkerManager().createWorker(id);
+			}
+
+			waiter = onceSomeFilesChanged(function (event, name) {
+				stdin.removeListener('data', onKeyPress);
+				stdin.pause();
+
+				logger.debug('File ' + name + ' was ' + event + 'd, reloading');
+
+				processManager.getWorkerManager().createWorker(id);
+			});
+
+			stdin.resume();
+			stdin.once('data', onKeyPress);
 		}
-	}
+	});
 });
 
 // Clean up old lingering sockets
@@ -323,14 +426,19 @@ cluster.on('message', function (worker, message) {
 	case 'reload':
 		closeDebuggerConnections();
 		logger.notice('reloading worker');
-		mage.core.processManager.reload(function () {
-			logger.notice('worker reloaded');
-		});
+		worker.kill();
 		break;
 	case 'shutdown':
-		closeDebuggerConnections();
 		logger.notice('shutting down');
-		mage.quit();
+		cluster.removeAllListeners('exit');
+		worker.once('exit', function () {
+			closeDebuggerConnection();
+			mage.quit();
+			process.exit();
+		});
+
+		worker.kill();
+
 		break;
 	}
 });
@@ -340,7 +448,8 @@ var server = net.createServer(function (client) {
 	logger.notice('connected');
 
 	var stdin = process.stdin;
-	stdin.setRawMode(true);
+	setRawMode(true);
+
 	stdin.setEncoding('utf8');
 	stdin.resume();
 
@@ -348,7 +457,7 @@ var server = net.createServer(function (client) {
 	stdin.pipe(client);
 
 	client.on('end', function () {
-		stdin.setRawMode(false);
+		setRawMode(false);
 		stdin.pause();
 		logger.notice('disconnected');
 	});
