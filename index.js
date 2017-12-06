@@ -58,7 +58,7 @@ function setRawMode(val) {
 			.details('Please try to use PowerShell or cmd.exe instead')
 			.log('Cannot run mage-console; cannot switch to raw mode');
 
-		mage.quit(1, true);
+		mage.exit(1, true);
 	}
 
 	stdin.setRawMode(val);
@@ -87,7 +87,7 @@ function onceSomeFilesChanged(onChange) {
 
 function crash(error) {
 	mage.logger.error(error);
-	mage.quit();
+	mage.exit();
 }
 
 /**
@@ -278,11 +278,18 @@ function connect() {
 	client.columns = process.stdout.columns;
 	client.rows = process.stdout.rows;
 
-	process.stdout.on('resize', function () {
+	// Some versions of Node have a bug where 'resize' does not
+	// fire up; we directly call on sigwinch as well just to be sure
+	//
+	// Ref: https://github.com/nodejs/node/issues/16194
+	function onResize() {
 		client.columns = process.stdout.columns;
 		client.rows = process.stdout.rows;
 		client.emit('resize');
-	});
+	}
+
+	process.on('SIGWINCH', onResize);
+	process.stdout.on('resize', onResize);
 
 	client.once('end', function () {
 		closing = true;
@@ -328,7 +335,13 @@ processManager.on('started', function () {
 			var stdin = process.stdin;
 			var waiter;
 
+			var kill = () => process.exit();
+
+			process.once('SIGINT', kill);
+
 			function onKeyPress() {
+				process.removeListener('SIGINT', kill);
+
 				if (waiter) {
 					waiter.close();
 				}
@@ -400,6 +413,10 @@ net.createServer(function (localSocket) {
 	localSocket.pipe(debuggerConnection);
 
 	debuggerConnection.on('error', function (error) {
+		if (error.code === 'ECONNREFUSED') {
+			return;
+		}
+
 		logger.warning('Error raised on the connection to the worker debug port', error);
 		closeDebuggerConnection({ localSocket, debuggerConnection });
 	});
@@ -432,8 +449,8 @@ cluster.on('message', function (worker, message) {
 		logger.notice('shutting down');
 		cluster.removeAllListeners('exit');
 		worker.once('exit', function () {
-			closeDebuggerConnection();
-			mage.quit();
+			closeDebuggerConnections();
+			mage.exit();
 			process.exit();
 		});
 
